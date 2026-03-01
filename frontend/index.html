@@ -1,1 +1,100 @@
-<!-- Frontend UI -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Impiricus Clinical Intelligence Graph</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://unpkg.com/3d-force-graph@1"></script>
+</head>
+<body>
+
+  <!-- Graph canvas — full viewport, ForceGraph3D renders into this -->
+  <div id="graph"></div>
+
+  <!-- ─── Top Bar ──────────────────────────────────────────────────────────── -->
+  <div id="top-bar">
+    <div id="top-bar-left">
+      <select id="state-select"></select>
+      <select id="year-select">
+        <option value="2023">2023</option>
+        <option value="2022">2022</option>
+        <option value="2021">2021</option>
+        <option value="2020">2020</option>
+      </select>
+    </div>
+
+    <h1 id="top-bar-title" class="font-syne">IMPIRICUS GRAPH</h1>
+
+    <div id="top-bar-right">
+      <button id="ftm-btn" onclick="toggleFollowMoney()">Follow the Money</button>
+      <div id="stats-bar">
+        <span>Nodes: <span id="stat-nodes">—</span></span>
+        <span>Edges: <span id="stat-edges">—</span></span>
+        <span>Payments: <span id="stat-payments">—</span></span>
+        <span id="stat-label">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Ranked Sidebar ───────────────────────────────────────────────────── -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <p id="sidebar-label">Top Payers</p>
+      <input id="sidebar-search" type="text" placeholder="Search..." oninput="filterSidebar(this.value)" />
+    </div>
+    <div id="pharma-list"></div>
+  </div>
+
+  <!-- ─── Node Info Panel ──────────────────────────────────────────────────── -->
+  <div id="node-panel">
+    <div id="panel-header">
+      <div>
+        <span id="panel-badge"></span>
+        <h2 id="panel-title" class="font-syne"></h2>
+      </div>
+      <button id="panel-close" onclick="closeNodePanel()">×</button>
+    </div>
+    <div id="panel-props"></div>
+  </div>
+
+  <!-- ─── Loading Overlay ──────────────────────────────────────────────────── -->
+  <div id="loading">
+    <div id="loading-dots">
+      <div class="pulse-dot"></div>
+      <div class="pulse-dot"></div>
+      <div class="pulse-dot"></div>
+    </div>
+    <p id="loading-text"></p>
+  </div>
+
+  <!-- ─── Follow the Money Instruction Bar ─────────────────────────────────── -->
+  <div id="ftm-bar">
+    <span id="ftm-instruction"></span>
+    <button id="ftm-reset" onclick="resetFollowMoney()">Reset</button>
+  </div>
+
+  <!-- ─── Legend ───────────────────────────────────────────────────────────── -->
+  <div id="legend">
+    <div id="legend-header">
+      <span id="legend-label">Legend</span>
+      <button id="legend-toggle" onclick="toggleLegend()">−</button>
+    </div>
+    <div id="legend-body">
+      <div class="legend-nodes">
+        <div class="legend-row"><div class="legend-dot" style="background:#00E5FF;"></div><span class="legend-text">Pharma Company</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#00FF9D;"></div><span class="legend-text">Physician</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#FFD600;"></div><span class="legend-text">Drug</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#FF4D8B;"></div><span class="legend-text">Condition</span></div>
+      </div>
+      <div class="legend-edges">
+        <div class="legend-row"><div class="legend-line" style="background:#FF6B35;"></div><span class="legend-text">PAID</span></div>
+        <div class="legend-row"><div class="legend-line" style="background:#7B61FF;"></div><span class="legend-text">PEER_OF</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
