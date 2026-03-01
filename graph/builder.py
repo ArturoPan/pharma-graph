@@ -238,7 +238,7 @@ def _add_peer_of_edges(G: nx.DiGraph, payments: list[dict], physicians: list[dic
 # ---------------------------------------------------------------------------
 
 def _serialize(G: nx.DiGraph, state: str, year: int) -> GraphResponse:
-    nodes = [
+    all_nodes = [
         Node(
             id=node_id,
             type=attrs["type"],
@@ -248,7 +248,7 @@ def _serialize(G: nx.DiGraph, state: str, year: int) -> GraphResponse:
         for node_id, attrs in G.nodes(data=True)
     ]
 
-    edges = [
+    all_edges = [
         Edge(
             source=u,
             target=v,
@@ -259,15 +259,33 @@ def _serialize(G: nx.DiGraph, state: str, year: int) -> GraphResponse:
         for u, v, attrs in G.edges(data=True)
     ]
 
-    # Truncate by weight if over limits
-    if len(nodes) > MAX_NODES:
-        nodes.sort(key=lambda n: n.props.get("total_paid") or n.props.get("total_received") or 0, reverse=True)
-        nodes = nodes[:MAX_NODES]
-        kept_ids = {n.id for n in nodes}
-        edges = [e for e in edges if e.source in kept_ids and e.target in kept_ids]
+    # --- Node truncation ---
+    # Always keep anchor nodes (pharma, drug, condition) — they are few and
+    # structurally important. Only truncate physicians when over the limit.
+    anchor_nodes = [n for n in all_nodes if n.type != "physician"]
+    physician_nodes = sorted(
+        [n for n in all_nodes if n.type == "physician"],
+        key=lambda n: n.props.get("total_received", 0),
+        reverse=True,
+    )
+    physician_slots = MAX_NODES - len(anchor_nodes)
+    nodes = anchor_nodes + physician_nodes[:max(physician_slots, 0)]
+    kept_ids = {n.id for n in nodes}
 
+    # --- Edge truncation ---
+    # Keep all structural edges whose endpoints survived node truncation.
+    # For PAID edges (potentially hundreds), sort by weight and cap separately.
+    structural_edges = [
+        e for e in all_edges
+        if e.type != "PAID" and e.source in kept_ids and e.target in kept_ids
+    ]
+    paid_edges = sorted(
+        [e for e in all_edges if e.type == "PAID" and e.source in kept_ids and e.target in kept_ids],
+        key=lambda e: e.weight,
+        reverse=True,
+    )
+    edges = structural_edges + paid_edges
     if len(edges) > MAX_EDGES:
-        edges.sort(key=lambda e: e.weight, reverse=True)
         edges = edges[:MAX_EDGES]
 
     return GraphResponse(
