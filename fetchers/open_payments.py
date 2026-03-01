@@ -4,14 +4,14 @@ import httpx
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://openpaymentsdata.cms.gov/api/1/datastore/query/{dataset_id}/0"
-LIST_URL = "https://openpaymentsdata.cms.gov/api/1/datastore/list"
+LIST_URL = "https://openpaymentsdata.cms.gov/api/1/metastore/schemas/dataset/items?show-reference-ids=false"
 
-# PRD-provided dataset IDs — 2021/2022 are placeholders, resolved at runtime via LIST_URL
+# Verified dataset IDs from CMS metastore (api/1/metastore/schemas/dataset/items)
 OPEN_PAYMENTS_DATASETS: dict[int, str] = {
-    2020: "0380bbeb-aea1-5898-90ef-7f4e02b26f24",
-    2021: "d7c1c06a-4b7e-5d7d-9b5d-7b5b3b5b5b5b",
-    2022: "9b5d7b5b-3b5b-5b5b-7b5b-3b5b5b5b5b5b",
-    2023: "06dba66e-9378-5e56-9b93-0bdc8b193ebb",
+    2020: "a08c4b30-5cf3-4948-ad40-36f404619019",
+    2021: "0380bbeb-aea1-58b6-b708-829f92a48202",
+    2022: "df01c2f8-dc1f-4e79-96cb-8208beaf143c",
+    2023: "fb3a65aa-c901-4a38-a813-b04b00dfa2a9",
 }
 
 # CMS Open Payments field names in the API response

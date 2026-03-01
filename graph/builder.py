@@ -82,6 +82,8 @@ def _add_physician_nodes(G: nx.DiGraph, physicians: list[dict], payments: list[d
     for p in payments:
         totals[p["npi"]] = totals.get(p["npi"], 0.0) + p["amount"]
 
+    # Add physicians from NPI Registry (rich data — specialty, city, state)
+    npi_seen: set[str] = set()
     for ph in physicians:
         node_id = f"npi_{ph['npi']}"
         G.add_node(
@@ -96,6 +98,29 @@ def _add_physician_nodes(G: nx.DiGraph, physicians: list[dict], payments: list[d
                 "total_received": round(totals.get(ph["npi"], 0.0), 2),
             },
         )
+        npi_seen.add(ph["npi"])
+
+    # Also add physicians from payments who weren't in the NPI query results
+    # (e.g. different specialty, different state of practice)
+    for p in payments:
+        if p["npi"] in npi_seen:
+            continue
+        node_id = f"npi_{p['npi']}"
+        if not G.has_node(node_id):
+            full_name = f"Dr. {p['physician_first']} {p['physician_last']}".strip()
+            G.add_node(
+                node_id,
+                type="physician",
+                label=full_name if full_name != "Dr." else f"Dr. (NPI {p['npi']})",
+                props={
+                    "npi": p["npi"],
+                    "specialty": "",
+                    "city": "",
+                    "state": "",
+                    "total_received": round(totals.get(p["npi"], 0.0), 2),
+                },
+            )
+            npi_seen.add(p["npi"])
 
 
 # ---------------------------------------------------------------------------
