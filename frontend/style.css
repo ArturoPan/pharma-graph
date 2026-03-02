@@ -338,7 +338,7 @@ select option {
 #legend {
   position: fixed;
   bottom: 16px;
-  left: 16px;
+  right: 16px;
   z-index: 10;
   background: rgba(13,21,32,0.92);
   border: 1px solid #1A2D45;
