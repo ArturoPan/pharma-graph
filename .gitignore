@@ -15,3 +15,8 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# Internal docs — not for public view
+CLAUDE.md
+impiricus-graph-prd.md
+docs/
