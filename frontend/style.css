@@ -270,6 +270,48 @@ select option {
   color: white;
 }
 
+/* ─── Pharma detail sections ────────────────────────────────────────────────── */
+
+.panel-section {
+  padding: 12px 16px;
+  border-top: 1px solid #1A2D45;
+}
+
+.panel-section-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(26,45,69,0.5);
+  gap: 8px;
+}
+
+.detail-item:last-child { border-bottom: none; }
+
+.detail-item-name {
+  font-size: 11px;
+  color: white;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-item-meta {
+  font-size: 10px;
+  color: #7B8FA6;
+  flex-shrink: 0;
+}
+
 /* ─── Loading overlay ───────────────────────────────────────────────────────── */
 
 #loading {

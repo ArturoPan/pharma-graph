@@ -1,7 +1,9 @@
 import asyncio
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,10 +19,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# In-memory cache: { (state, year): { "data": GraphResponse, "ts": float } }
+# Disk cache — persists across server restarts
+# In-memory cache — avoids re-reading disk within the same session
 # ---------------------------------------------------------------------------
-_cache: dict[tuple[str, int], dict] = {}
-CACHE_TTL = 3600  # 1 hour in seconds
+DATA_DIR = Path("data")
+DATA_DIR.mkdir(exist_ok=True)
+
+_memory_cache: dict[tuple[str, int], GraphResponse] = {}
 
 VALID_YEARS = {2020, 2021, 2022, 2023}
 US_STATES = {
@@ -31,9 +36,38 @@ US_STATES = {
 }
 
 
+def _disk_path(state: str, year: int) -> Path:
+    return DATA_DIR / f"{state}_{year}.json"
+
+
+def _load_from_disk(state: str, year: int) -> GraphResponse | None:
+    path = _disk_path(state, year)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        graph = GraphResponse(**data)
+        logger.info("Disk cache hit for state=%s year=%s", state, year)
+        return graph
+    except Exception as exc:
+        logger.warning("Failed to load disk cache for %s/%s: %s", state, year, exc)
+        return None
+
+
+def _save_to_disk(state: str, year: int, graph: GraphResponse) -> None:
+    try:
+        _disk_path(state, year).write_text(graph.model_dump_json())
+        logger.info("Saved to disk cache: %s_%s.json", state, year)
+    except Exception as exc:
+        logger.warning("Failed to save disk cache: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Impiricus Graph API starting up")
+    cached = list(DATA_DIR.glob("*.json"))
+    if cached:
+        logger.info("Disk cache contains: %s", [f.name for f in cached])
     yield
     logger.info("Impiricus Graph API shutting down")
 
@@ -65,22 +99,27 @@ async def get_graph(state: str, year: int) -> GraphResponse:
     if year not in VALID_YEARS:
         raise HTTPException(status_code=400, detail=f"Year must be one of {sorted(VALID_YEARS)}")
 
-    # Return cached response if still fresh
     cache_key = (state, year)
-    cached = _cache.get(cache_key)
-    if cached and (time.time() - cached["ts"]) < CACHE_TTL:
-        logger.info("Cache hit for state=%s year=%s", state, year)
-        return cached["data"]
 
-    logger.info("Cache miss — fetching data for state=%s year=%s", state, year)
+    # 1. In-memory cache (fastest)
+    if cache_key in _memory_cache:
+        logger.info("Memory cache hit for state=%s year=%s", state, year)
+        return _memory_cache[cache_key]
 
-    # Step 1: fetch payments and physicians in parallel
+    # 2. Disk cache (survives server restarts)
+    graph = _load_from_disk(state, year)
+    if graph:
+        _memory_cache[cache_key] = graph
+        return graph
+
+    # 3. Live fetch from APIs
+    logger.info("No cache — fetching live data for state=%s year=%s", state, year)
+
     payments, physicians = await asyncio.gather(
         fetch_open_payments(state, year),
         fetch_npi_physicians(state),
     )
 
-    # Step 2: fetch drugs based on company names from payments
     company_names = list({p["company"] for p in payments})
     drugs = await fetch_drugs(company_names)
 
@@ -89,18 +128,18 @@ async def get_graph(state: str, year: int) -> GraphResponse:
         len(payments), len(physicians), len(drugs), state, year,
     )
 
-    # Step 3: assemble graph
     graph = build_graph(payments, physicians, drugs, state, year)
 
-    # Store in cache
-    _cache[cache_key] = {"data": graph, "ts": time.time()}
+    _memory_cache[cache_key] = graph
+    _save_to_disk(state, year, graph)
 
     return graph
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "cached_queries": len(_cache)}
+    cached = [f.stem for f in DATA_DIR.glob("*.json")]
+    return {"status": "ok", "memory_cache": len(_memory_cache), "disk_cache": cached}
 
 
 # Serve frontend — must be mounted last so API routes take priority

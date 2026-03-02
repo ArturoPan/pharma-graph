@@ -57,6 +57,22 @@
       <button id="panel-close" onclick="closeNodePanel()">×</button>
     </div>
     <div id="panel-props"></div>
+
+    <!-- Pharma-specific detail sections (only visible for pharma nodes) -->
+    <div id="pharma-detail" style="display:none;">
+      <div class="panel-section">
+        <div class="panel-section-title" style="color:#FFD600;">Drugs</div>
+        <div id="detail-drugs"></div>
+      </div>
+      <div class="panel-section">
+        <div class="panel-section-title" style="color:#FF4D8B;">Conditions</div>
+        <div id="detail-conditions"></div>
+      </div>
+      <div class="panel-section">
+        <div class="panel-section-title" style="color:#00FF9D;">Physicians Paid</div>
+        <div id="detail-physicians"></div>
+      </div>
+    </div>
   </div>
 
   <!-- ─── Loading Overlay ──────────────────────────────────────────────────── -->

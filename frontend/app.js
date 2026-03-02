@@ -74,9 +74,11 @@ function initGraph() {
         : NODE_DIM[node.type];
     })
     .nodeVal(node => {
-      if (node.type === 'pharma')    return Math.sqrt((node.props.total_paid    || 500) / 1000) + 5;
-      if (node.type === 'physician') return Math.sqrt((node.props.total_received || 500) / 500)  + 3;
-      return 4;
+      if (node.type === 'pharma')    return Math.log((node.props.total_paid    || 500) / 50  + 2) * 6 + 6;
+      if (node.type === 'physician') return Math.sqrt((node.props.total_received || 50)  / 2000) + 1;
+      if (node.type === 'drug')      return 3;
+      if (node.type === 'condition') return 5;
+      return 2;
     })
     .nodeOpacity(0.9)
     .linkSource('source')
@@ -111,6 +113,9 @@ function initGraph() {
   // Tighter force physics — less repulsion, shorter links, nodes cluster closer
   G.d3Force('charge').strength(-25);
   G.d3Force('link').distance(25);
+
+  // Faster scroll-wheel zoom so users can pull back from a node quickly
+  G.controls().zoomSpeed = 3;
 
   window.addEventListener('resize', () => {
     G.width(window.innerWidth);
@@ -210,7 +215,7 @@ function filterSidebar(query) {
 
 function flyToNode(node) {
   if (!G || node.x === undefined) return;
-  const dist = 120;
+  const dist = 220;
   const r = 1 + dist / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
   G.cameraPosition(
     { x: node.x * r, y: node.y * r, z: node.z * r },
@@ -256,7 +261,99 @@ function showNodePanel(node) {
     propsEl.appendChild(row);
   });
 
+  // Show pharma detail lists if this is a pharma node
+  const detail = document.getElementById('pharma-detail');
+  if (node.type === 'pharma') {
+    showPharmaDetail(node);
+    detail.style.display = 'block';
+  } else {
+    detail.style.display = 'none';
+  }
+
   document.getElementById('node-panel').style.transform = 'translateX(0)';
+}
+
+function showPharmaDetail(pharmaNode) {
+  const links = currentData ? currentData.edges : [];
+  const nodes = currentData ? currentData.nodes : [];
+  const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+  // Physicians paid by this pharma — sorted by amount desc
+  const paidEdges = links
+    .filter(l => l.type === 'PAID' && getNodeId(l.source) === pharmaNode.id)
+    .sort((a, b) => b.weight - a.weight);
+
+  const physicianEl = document.getElementById('detail-physicians');
+  physicianEl.innerHTML = '';
+  if (!paidEdges.length) {
+    physicianEl.innerHTML = '<div class="detail-item-meta">None found</div>';
+  } else {
+    paidEdges.slice(0, 20).forEach(edge => {
+      const doc = nodeMap[getNodeId(edge.target)];
+      if (!doc) return;
+      const row = document.createElement('div');
+      row.className = 'detail-item';
+      row.innerHTML = `
+        <span class="detail-item-name">${doc.label}</span>
+        <span class="detail-item-meta">${formatMoney(edge.weight)}</span>`;
+      row.onclick = () => { flyToNode(doc); applyHighlight(doc.id); };
+      row.style.cursor = 'pointer';
+      physicianEl.appendChild(row);
+    });
+    if (paidEdges.length > 20) {
+      const more = document.createElement('div');
+      more.className = 'detail-item-meta';
+      more.style.paddingTop = '6px';
+      more.textContent = `+ ${paidEdges.length - 20} more`;
+      physicianEl.appendChild(more);
+    }
+  }
+
+  // Drugs manufactured by this pharma
+  const drugEdges = links
+    .filter(l => l.type === 'MANUFACTURES' && getNodeId(l.source) === pharmaNode.id);
+
+  const drugsEl = document.getElementById('detail-drugs');
+  drugsEl.innerHTML = '';
+  if (!drugEdges.length) {
+    drugsEl.innerHTML = '<div class="detail-item-meta">None found in OpenFDA</div>';
+  } else {
+    drugEdges.forEach(edge => {
+      const drug = nodeMap[getNodeId(edge.target)];
+      if (!drug) return;
+      const row = document.createElement('div');
+      row.className = 'detail-item';
+      row.innerHTML = `
+        <span class="detail-item-name">${drug.label}</span>
+        <span class="detail-item-meta">${drug.props.generic_name || ''}</span>`;
+      drugsEl.appendChild(row);
+    });
+  }
+
+  // Conditions — via drug → condition edges for drugs made by this pharma
+  const drugIds = new Set(drugEdges.map(e => getNodeId(e.target)));
+  const conditionIds = new Set(
+    links
+      .filter(l => l.type === 'INDICATED_FOR' && drugIds.has(getNodeId(l.source)))
+      .map(l => getNodeId(l.target))
+  );
+
+  const conditionsEl = document.getElementById('detail-conditions');
+  conditionsEl.innerHTML = '';
+  if (!conditionIds.size) {
+    conditionsEl.innerHTML = '<div class="detail-item-meta">None parsed from drug labels</div>';
+  } else {
+    conditionIds.forEach(condId => {
+      const cond = nodeMap[condId];
+      if (!cond) return;
+      const row = document.createElement('div');
+      row.className = 'detail-item';
+      row.innerHTML = `
+        <span class="detail-item-name">${cond.label}</span>
+        <span class="detail-item-meta">${cond.props.icd10_code || ''}</span>`;
+      conditionsEl.appendChild(row);
+    });
+  }
 }
 
 function closeNodePanel() {

@@ -16,6 +16,9 @@ venv/
 .vscode/
 .idea/
 
+# Demo data cache
+data/
+
 # Internal docs — not for public view
 CLAUDE.md
 impiricus-graph-prd.md
