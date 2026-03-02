@@ -5,9 +5,11 @@ from graph.models import Edge, GraphMeta, GraphResponse, Node
 
 logger = logging.getLogger(__name__)
 
-MAX_NODES = 500
-MAX_EDGES = 1000
+MAX_EDGES = 1200
 MAX_PEER_EDGES = 400
+MAX_DEVICE_NODES = 60   # Cap device nodes; keep by total payment volume
+MAX_DRUG_NODES   = 80   # Cap drug nodes; keep those with most condition links
+MAX_PHYSICIAN_NODES = 200
 
 TAXONOMY_CONDITION_MAP: dict[str, list[str]] = {
     "Cardiology":        ["I48", "I50"],
@@ -19,7 +21,10 @@ TAXONOMY_CONDITION_MAP: dict[str, list[str]] = {
 
 
 def _slugify(name: str) -> str:
-    return name.lower().strip().replace(" ", "_").replace("/", "_")
+    s = name.lower().strip().replace(" ", "_").replace("/", "_")
+    for c in ".,'":
+        s = s.replace(c, "")
+    return s or "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +79,55 @@ def _add_condition_nodes(G: nx.DiGraph, drugs: list[dict]) -> None:
                     props={"icd10_code": cond["icd10"]},
                 )
                 seen.add(node_id)
+
+
+def _build_drug_lookup(drugs: list[dict]) -> dict[str, str]:
+    """Normalized product name -> drug node id (for matching payment product to drug)."""
+    lookup: dict[str, str] = {}
+    for drug in drugs:
+        for name in [drug.get("brand"), drug.get("generic")]:
+            if name:
+                lookup[name.lower().strip()] = drug["id"]
+    return lookup
+
+
+def _add_device_nodes(G: nx.DiGraph, payments: list[dict], drugs: list[dict]) -> dict[tuple[str, str], str]:
+    """
+    Add device/product nodes from CMS payment product field when it's not a known drug.
+    Returns lookup (company_slug, product_name_lower) -> device_id for RECEIVED_FOR edges.
+    """
+    drug_lookup = _build_drug_lookup(drugs)
+    device_agg: dict[tuple[str, str], tuple[str, str, float]] = {}
+    for p in payments:
+        product = (p.get("drug") or "").strip()
+        if not product:
+            continue
+        key_lower = product.lower()
+        if key_lower in drug_lookup:
+            continue
+        company = p["company"]
+        c_slug = _slugify(company)
+        key = (c_slug, key_lower)
+        if key not in device_agg:
+            device_agg[key] = (company, product, 0.0)
+        company_label, product_label, total = device_agg[key]
+        device_agg[key] = (company_label, product_label, total + p["amount"])
+
+    sorted_devices = sorted(device_agg.items(), key=lambda x: -x[1][2])[:MAX_DEVICE_NODES]
+    device_lookup: dict[tuple[str, str], str] = {}
+    for (c_slug, key_lower), (company_label, product_label, total) in sorted_devices:
+        device_id = f"device_{c_slug}_{_slugify(product_label)}"
+        G.add_node(
+            device_id,
+            type="device",
+            label=product_label,
+            props={
+                "manufacturer": company_label,
+                "total_payments": round(total, 2),
+            },
+        )
+        device_lookup[(c_slug, key_lower)] = device_id
+    return device_lookup
 
 
 def _add_physician_nodes(G: nx.DiGraph, physicians: list[dict], payments: list[dict]) -> None:
@@ -134,6 +188,18 @@ def _add_manufactures_edges(G: nx.DiGraph, drugs: list[dict]) -> None:
             G.add_edge(pharma_slug, drug["id"], type="MANUFACTURES", weight=1.0, props={})
 
 
+def _add_manufactures_device_edges(G: nx.DiGraph) -> None:
+    for node_id, attrs in G.nodes(data=True):
+        if attrs.get("type") != "device":
+            continue
+        manufacturer = (attrs.get("props") or {}).get("manufacturer", "")
+        if not manufacturer:
+            continue
+        pharma_slug = _slugify(manufacturer)
+        if G.has_node(pharma_slug):
+            G.add_edge(pharma_slug, node_id, type="MANUFACTURES", weight=1.0, props={})
+
+
 def _add_indicated_for_edges(G: nx.DiGraph, drugs: list[dict]) -> None:
     for drug in drugs:
         for cond in drug["conditions"]:
@@ -177,19 +243,17 @@ def _add_paid_edges(G: nx.DiGraph, payments: list[dict]) -> None:
                 )
 
 
-def _add_received_for_edges(G: nx.DiGraph, payments: list[dict], drugs: list[dict]) -> None:
-    # Build a lookup: normalized drug name → drug node ID
-    drug_lookup: dict[str, str] = {}
-    for drug in drugs:
-        for name in [drug["brand"], drug["generic"]]:
-            if name:
-                drug_lookup[name.lower()] = drug["id"]
+def _add_received_for_edges(G: nx.DiGraph, payments: list[dict], drugs: list[dict], device_lookup: dict[tuple[str, str], str] | None = None) -> None:
+    drug_lookup = _build_drug_lookup(drugs)
+    if device_lookup is None:
+        device_lookup = {}
 
     for p in payments:
         if not p["drug"]:
             continue
-        drug_id = drug_lookup.get(p["drug"].lower())
+        product_lower = p["drug"].lower()
         physician_id = f"npi_{p['npi']}"
+        drug_id = drug_lookup.get(product_lower)
         if drug_id and G.has_node(physician_id) and G.has_node(drug_id):
             if G.has_edge(physician_id, drug_id):
                 G[physician_id][drug_id]["weight"] += p["amount"]
@@ -201,19 +265,24 @@ def _add_received_for_edges(G: nx.DiGraph, payments: list[dict], drugs: list[dic
                     weight=p["amount"],
                     props={},
                 )
+            continue
+        c_slug = _slugify(p["company"])
+        device_id = device_lookup.get((c_slug, product_lower))
+        if device_id and G.has_node(physician_id) and G.has_node(device_id):
+            if G.has_edge(physician_id, device_id):
+                G[physician_id][device_id]["weight"] += p["amount"]
+            else:
+                G.add_edge(
+                    physician_id,
+                    device_id,
+                    type="RECEIVED_FOR",
+                    weight=p["amount"],
+                    props={},
+                )
 
 
-def _add_peer_of_edges(G: nx.DiGraph, payments: list[dict], physicians: list[dict]) -> None:
-    # Map NPI → specialty
+def _add_peer_of_edges(G: nx.DiGraph, physicians: list[dict]) -> None:
     specialty_map: dict[str, str] = {ph["npi"]: ph["specialty"] for ph in physicians}
-
-    # Map NPI → set of pharma slugs that paid them
-    payers_map: dict[str, set[str]] = {}
-    for p in payments:
-        npi = p["npi"]
-        slug = _slugify(p["company"])
-        payers_map.setdefault(npi, set()).add(slug)
-
     npi_list = list(specialty_map.keys())
     peer_count = 0
 
@@ -259,30 +328,48 @@ def _serialize(G: nx.DiGraph, state: str, year: int) -> GraphResponse:
     ]
 
     # --- Node truncation ---
-    # Always keep anchor nodes (pharma, drug, condition) — they are few and
-    # structurally important. Only truncate physicians when over the limit.
-    anchor_nodes = [n for n in all_nodes if n.type != "physician"]
+    # Priority: all pharma, all conditions, top drugs (by condition count),
+    # top devices (by payments), then top physicians (by total_received).
+    pharma_nodes    = [n for n in all_nodes if n.type == "pharma"]
+    condition_nodes = [n for n in all_nodes if n.type == "condition"]
+    drug_nodes = sorted(
+        [n for n in all_nodes if n.type == "drug"],
+        key=lambda n: len(n.props.get("conditions", [])),
+        reverse=True,
+    )[:MAX_DRUG_NODES]
+    device_nodes = sorted(
+        [n for n in all_nodes if n.type == "device"],
+        key=lambda n: n.props.get("total_payments", 0),
+        reverse=True,
+    )[:MAX_DEVICE_NODES]
     physician_nodes = sorted(
         [n for n in all_nodes if n.type == "physician"],
         key=lambda n: n.props.get("total_received", 0),
         reverse=True,
-    )
-    physician_slots = MAX_NODES - len(anchor_nodes)
-    nodes = anchor_nodes + physician_nodes[:max(physician_slots, 0)]
+    )[:MAX_PHYSICIAN_NODES]
+
+    nodes = pharma_nodes + condition_nodes + drug_nodes + device_nodes + physician_nodes
     kept_ids = {n.id for n in nodes}
 
     # --- Edge truncation ---
     # Keep all structural edges whose endpoints survived node truncation.
-    # For PAID edges (potentially hundreds), sort by weight and cap separately.
+    # For PAID edges: reserve up to 20 per pharma (by weight) so each pharma keeps physicians;
+    # then fill remaining slots with highest-weight PAID edges overall.
     structural_edges = [
         e for e in all_edges
         if e.type != "PAID" and e.source in kept_ids and e.target in kept_ids
     ]
-    paid_edges = sorted(
-        [e for e in all_edges if e.type == "PAID" and e.source in kept_ids and e.target in kept_ids],
-        key=lambda e: e.weight,
-        reverse=True,
-    )
+    paid_all = [
+        e for e in all_edges
+        if e.type == "PAID" and e.source in kept_ids and e.target in kept_ids
+    ]
+    by_pharma: dict[str, list] = {}
+    for e in paid_all:
+        by_pharma.setdefault(e.source, []).append(e)
+    paid_per_pharma: list[Edge] = []
+    for _source, es in by_pharma.items():
+        paid_per_pharma.extend(sorted(es, key=lambda x: x.weight, reverse=True)[:20])
+    paid_edges = sorted(paid_per_pharma, key=lambda e: e.weight, reverse=True)
     edges = structural_edges + paid_edges
     if len(edges) > MAX_EDGES:
         edges = edges[:MAX_EDGES]
@@ -317,17 +404,19 @@ def build_graph(
     _add_pharma_nodes(G, payments)
     _add_drug_nodes(G, drugs)
     _add_condition_nodes(G, drugs)
+    device_lookup = _add_device_nodes(G, payments, drugs)
     _add_physician_nodes(G, physicians, payments)
 
     # 2. Add explicit edges
     _add_manufactures_edges(G, drugs)
+    _add_manufactures_device_edges(G)
     _add_indicated_for_edges(G, drugs)
     _add_specializes_in_edges(G, physicians)
     _add_paid_edges(G, payments)
-    _add_received_for_edges(G, payments, drugs)
+    _add_received_for_edges(G, payments, drugs, device_lookup)
 
     # 3. Derive PEER_OF edges
-    _add_peer_of_edges(G, payments, physicians)
+    _add_peer_of_edges(G, physicians)
 
     logger.info(
         "Graph built: %d nodes, %d edges for state=%s year=%s",

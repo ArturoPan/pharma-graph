@@ -12,10 +12,13 @@ POST_URL = "https://openpaymentsdata.cms.gov/api/1/datastore/query/{dataset_id}/
 # Dataset IDs (from CMS metastore).  The SQL endpoint needs the *distribution* ID
 # (the child CSV resource), not the dataset wrapper ID.  We look it up once per year.
 DATASET_IDS: dict[int, str] = {
+    2018: "f003634c-c103-568f-876c-73017fa83be0",
+    2019: "4e54dd6c-30f8-4f86-86a7-3c109a89528e",
     2020: "a08c4b30-5cf3-4948-ad40-36f404619019",
     2021: "0380bbeb-aea1-58b6-b708-829f92a48202",
     2022: "df01c2f8-dc1f-4e79-96cb-8208beaf143c",
     2023: "fb3a65aa-c901-4a38-a813-b04b00dfa2a9",
+    2024: "e6b17c6a-2534-4207-a4a1-6746a14911ff",
 }
 
 # Distribution IDs pre-fetched from the metastore — SQL endpoint needs these.

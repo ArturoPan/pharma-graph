@@ -3,26 +3,28 @@
 const API_BASE = '';
 
 const NODE_COLORS = {
-  pharma:    '#00E5FF',
-  physician: '#00FF9D',
-  drug:      '#FFD600',
-  condition: '#FF4D8B',
+  pharma:    '#4FC3F7',
+  physician: '#81C995',
+  drug:      '#FFD54F',
+  condition: '#F48FB1',
+  device:    '#FFAB40',
 };
 
 const NODE_DIM = {
-  pharma:    'rgba(0,229,255,0.06)',
-  physician: 'rgba(0,255,157,0.06)',
-  drug:      'rgba(255,214,0,0.06)',
-  condition: 'rgba(255,77,139,0.06)',
+  pharma:    'rgba(79,195,247,0.05)',
+  physician: 'rgba(129,201,149,0.05)',
+  drug:      'rgba(255,213,79,0.05)',
+  condition: 'rgba(244,143,177,0.05)',
+  device:    'rgba(255,171,64,0.05)',
 };
 
 const EDGE_COLORS = {
-  PAID:           '#FF6B35',
-  PEER_OF:        '#7B61FF',
-  MANUFACTURES:   '#1A2D45',
-  INDICATED_FOR:  '#1A2D45',
-  SPECIALIZES_IN: '#1A2D45',
-  RECEIVED_FOR:   '#1A2D45',
+  PAID:           '#FF7043',
+  PEER_OF:        '#CE93D8',
+  MANUFACTURES:   'rgba(100,160,220,0.22)',
+  INDICATED_FOR:  'rgba(100,160,220,0.22)',
+  SPECIALIZES_IN: 'rgba(100,160,220,0.22)',
+  RECEIVED_FOR:   'rgba(100,160,220,0.22)',
 };
 
 const US_STATES = [
@@ -33,17 +35,19 @@ const US_STATES = [
 ];
 
 const BADGE_STYLES = {
-  pharma:    'background:rgba(0,229,255,0.12); color:#00E5FF;',
-  physician: 'background:rgba(0,255,157,0.12); color:#00FF9D;',
-  drug:      'background:rgba(255,214,0,0.12);  color:#FFD600;',
-  condition: 'background:rgba(255,77,139,0.12); color:#FF4D8B;',
+  pharma:    'background:rgba(79,195,247,0.15); color:#4FC3F7;',
+  physician: 'background:rgba(129,201,149,0.15); color:#81C995;',
+  drug:      'background:rgba(255,213,79,0.15);  color:#FFD54F;',
+  condition: 'background:rgba(244,143,177,0.15); color:#F48FB1;',
+  device:    'background:rgba(255,171,64,0.15); color:#FFAB40;',
 };
 
 const PANEL_BORDER = {
-  pharma:    '#00E5FF',
-  physician: '#00FF9D',
-  drug:      '#FFD600',
-  condition: '#FF4D8B',
+  pharma:    '#4FC3F7',
+  physician: '#81C995',
+  drug:      '#FFD54F',
+  condition: '#F48FB1',
+  device:    '#FFAB40',
 };
 
 // ─── APP STATE ────────────────────────────────────────────────────────────────
@@ -55,18 +59,14 @@ let highlightNodes = new Set();
 let highlightLinks = new Set();
 let allPharmaNodes = [];
 
-// Follow the Money state
-let ftmMode    = false;
-let ftmStep    = 0;
-let ftmPharmaId = null;
 
 // ─── GRAPH INIT ───────────────────────────────────────────────────────────────
 
 function initGraph() {
   G = ForceGraph3D()(document.getElementById('graph'))
-    .backgroundColor('#050A0F')
+    .backgroundColor('#08090d')
     .nodeId('id')
-    .nodeLabel(node => node.label)
+    .nodeLabel(() => '')  // suppress default tooltip; we use sprites instead
     .nodeColor(node => {
       if (!highlightNodes.size) return NODE_COLORS[node.type] || '#ffffff';
       return highlightNodes.has(node.id)
@@ -74,44 +74,63 @@ function initGraph() {
         : NODE_DIM[node.type];
     })
     .nodeVal(node => {
-      if (node.type === 'pharma')    return Math.log((node.props.total_paid    || 500) / 50  + 2) * 6 + 6;
-      if (node.type === 'physician') return Math.sqrt((node.props.total_received || 50)  / 2000) + 1;
+      if (node.type === 'pharma')    return Math.log((node.props.total_paid    || 500) / 50  + 2) * 8 + 8;
+      if (node.type === 'physician') return Math.sqrt((node.props.total_received || 50)  / 1000) + 2;
       if (node.type === 'drug')      return 3;
       if (node.type === 'condition') return 5;
+      if (node.type === 'device')    return 3;
       return 2;
     })
-    .nodeOpacity(0.9)
+    .nodeOpacity(0.92)
+    .nodeThreeObjectExtend(true)
+    .nodeThreeObject(node => {
+      if (typeof SpriteText === 'undefined') return null;
+      const showLabel = node.type === 'pharma' ||
+        (highlightNodes.size && highlightNodes.has(node.id));
+      if (!showLabel) return null;
+      const sprite = new SpriteText(node.label);
+      sprite.color = node.type === 'pharma' ? '#ffffff' : (NODE_COLORS[node.type] || '#cccccc');
+      sprite.textHeight = node.type === 'pharma' ? 5 : 4;
+      sprite.fontWeight = node.type === 'pharma' ? 'bold' : 'normal';
+      sprite.backgroundColor = 'rgba(8,9,13,0.55)';
+      sprite.padding = 1.5;
+      sprite.borderRadius = 2;
+      return sprite;
+    })
     .linkSource('source')
     .linkTarget('target')
     .linkColor(link => {
-      if (!highlightLinks.size) return EDGE_COLORS[link.type] || '#1A2D45';
+      if (!highlightLinks.size) return EDGE_COLORS[link.type] || 'rgba(100,160,220,0.18)';
       return highlightLinks.has(link)
         ? EDGE_COLORS[link.type]
-        : 'rgba(255,255,255,0.015)';
+        : 'rgba(255,255,255,0.02)';
     })
     .linkWidth(link => {
-      const base = link.type === 'PAID'
-        ? Math.log((link.weight / 1000) + 1) + 0.5
-        : 0.5;
-      return (highlightLinks.size && highlightLinks.has(link)) ? base * 2.5 : base;
+      const isPaid = link.type === 'PAID';
+      const isPeer = link.type === 'PEER_OF';
+      const base = isPaid
+        ? Math.log((link.weight / 1000) + 1) * 0.3 + 0.2
+        : isPeer ? 0.25
+        : 0.15;
+      return (highlightLinks.size && highlightLinks.has(link)) ? base * 4 : base;
     })
+    .linkOpacity(0.8)
+    .linkDirectionalParticles(link => (highlightLinks.has(link) && link.type === 'PAID') ? 2 : 0)
+    .linkDirectionalParticleWidth(1.5)
+    .linkDirectionalParticleSpeed(0.005)
     .d3AlphaDecay(0.015)
     .d3VelocityDecay(0.25)
     .onNodeClick(node  => handleNodeClick(node))
     .onNodeHover(node  => handleNodeHover(node))
     .onBackgroundClick(() => {
-      if (ftmMode) return;
       selectedNode = null;
       resetHighlight();
       closeNodePanel();
     });
 
-  // Tighter force physics — less repulsion, shorter links, nodes cluster closer
-  G.d3Force('charge').strength(-25);
-  G.d3Force('link').distance(25);
-
-  // Faster scroll-wheel zoom so users can pull back from a node quickly
-  G.controls().zoomSpeed = 3;
+  G.d3Force('charge').strength(-40);
+  G.d3Force('link').distance(30);
+  G.controls().zoomSpeed = 5;
 
   window.addEventListener('resize', () => {
     G.width(window.innerWidth);
@@ -126,22 +145,25 @@ async function loadGraph(state, year) {
   selectedNode = null;
   resetHighlight();
   closeNodePanel();
-  if (ftmMode) resetFollowMoney();
 
   try {
     const res = await fetch(`${API_BASE}/api/graph/${state}/${year}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || (Array.isArray(data.detail) ? data.detail.map(d => d.msg || d).join(', ') : null) || `HTTP ${res.status}`);
+    }
     currentData = data;
 
-    G.graphData({ nodes: data.nodes, links: data.edges });
+    const graphNodes = JSON.parse(JSON.stringify(data.nodes));
+    const graphLinks = JSON.parse(JSON.stringify(data.edges));
+    G.graphData({ nodes: graphNodes, links: graphLinks });
     updateStatsBar(data);
     updateSidebar(data.nodes);
     hideLoading();
   } catch (err) {
     console.error(err);
     document.getElementById('loading-text').textContent =
-      'Could not load data. Is the API running on port 8000?';
+      err.message || 'Could not load data. Is the API running on port 8000?';
   }
 }
 
@@ -160,9 +182,9 @@ function hideLoading() {
 // ─── STATS BAR ────────────────────────────────────────────────────────────────
 
 function updateStatsBar(data) {
-  const totalPaid = data.edges
+  const totalPaid = (data.edges || [])
     .filter(e => e.type === 'PAID')
-    .reduce((sum, e) => sum + e.weight, 0);
+    .reduce((sum, e) => sum + Number(e.weight || 0), 0);
 
   document.getElementById('stat-nodes').textContent    = data.meta.node_count;
   document.getElementById('stat-edges').textContent    = data.meta.edge_count;
@@ -210,17 +232,33 @@ function filterSidebar(query) {
 }
 
 function flyToNode(node) {
-  if (!G || node.x === undefined) return;
+  if (!G) return;
   selectedNode = node;
   applyHighlight(node.id);
-  const dist = 220;
-  const r = 1 + dist / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
-  G.cameraPosition(
-    { x: node.x * r, y: node.y * r, z: node.z * r },
-    node,
-    1000
-  );
   showNodePanel(node);
+  if (node.x !== undefined && node.y !== undefined && node.z !== undefined) {
+    const dist = 220;
+    const r = 1 + dist / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
+    G.cameraPosition(
+      { x: node.x * r, y: node.y * r, z: node.z * r },
+      node,
+      1000
+    );
+  } else {
+    const graph = G.graphData();
+    if (graph && graph.nodes) {
+      const graphNode = graph.nodes.find(n => n && n.id === node.id);
+      if (graphNode && graphNode.x !== undefined) {
+        const dist = 220;
+        const r = 1 + dist / Math.hypot(graphNode.x || 1, graphNode.y || 1, graphNode.z || 1);
+        G.cameraPosition(
+          { x: graphNode.x * r, y: graphNode.y * r, z: graphNode.z * r },
+          graphNode,
+          1000
+        );
+      }
+    }
+  }
 }
 
 // ─── NODE INFO PANEL ──────────────────────────────────────────────────────────
@@ -240,32 +278,36 @@ function showNodePanel(node) {
   propsEl.innerHTML = '';
 
   const entries = Object.entries(node.props || {});
-  if (!entries.length) {
+  const filtered = entries.filter(([, val]) => val !== '' && val !== null && val !== undefined);
+  if (!filtered.length) {
     propsEl.innerHTML = '<p class="prop-val" style="color:#7B8FA6;">No additional data.</p>';
-    return;
+  } else {
+    filtered.forEach(([key, val]) => {
+      let display = Array.isArray(val) ? val.join(', ') : val;
+      if (typeof val === 'number' && (key === 'total_paid' || key === 'total_received')) {
+        display = formatMoney(val);
+      }
+      const row = document.createElement('div');
+      row.innerHTML = `
+        <div class="prop-key">${key.replace(/_/g, ' ')}</div>
+        <div class="prop-val">${display}</div>`;
+      propsEl.appendChild(row);
+    });
   }
 
-  entries.forEach(([key, val]) => {
-    let display = Array.isArray(val) ? val.join(', ') : val;
-    if (typeof val === 'number' && (key === 'total_paid' || key === 'total_received')) {
-      display = formatMoney(val);
-    }
-    if (display === '' || display === null || display === undefined) display = '—';
-
-    const row = document.createElement('div');
-    row.innerHTML = `
-      <div class="prop-key">${key.replace(/_/g, ' ')}</div>
-      <div class="prop-val">${display}</div>`;
-    propsEl.appendChild(row);
-  });
-
-  // Show pharma detail lists if this is a pharma node
   const detail = document.getElementById('pharma-detail');
+  const physicianDetail = document.getElementById('physician-detail');
   if (node.type === 'pharma') {
-    showPharmaDetail(node);
     detail.style.display = 'block';
+    physicianDetail.style.display = 'none';
+    showPharmaDetail(node);
+  } else if (node.type === 'physician') {
+    detail.style.display = 'none';
+    physicianDetail.style.display = 'block';
+    showPhysicianDetail(node);
   } else {
     detail.style.display = 'none';
+    physicianDetail.style.display = 'none';
   }
 
   document.getElementById('node-panel').style.transform = 'translateX(0)';
@@ -275,11 +317,17 @@ function showPharmaDetail(pharmaNode) {
   const links = currentData ? currentData.edges : [];
   const nodes = currentData ? currentData.nodes : [];
   const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+  let pharmaId = pharmaNode && (pharmaNode.id != null && pharmaNode.id !== '' ? String(pharmaNode.id) : null);
+  if (!pharmaId && pharmaNode && pharmaNode.label) {
+    const byLabel = nodes.find(n => n.type === 'pharma' && n.label === pharmaNode.label);
+    if (byLabel) pharmaId = String(byLabel.id);
+  }
+  if (!pharmaId) return;
 
-  // Physicians paid by this pharma — sorted by amount desc
+  // Physicians paid by this pharma (source/target are strings from API)
   const paidEdges = links
-    .filter(l => l.type === 'PAID' && getNodeId(l.source) === pharmaNode.id)
-    .sort((a, b) => b.weight - a.weight);
+    .filter(l => l.type === 'PAID' && String(l.source || '') === pharmaId)
+    .sort((a, b) => Number(b.weight || 0) - Number(a.weight || 0));
 
   const physicianEl = document.getElementById('detail-physicians');
   physicianEl.innerHTML = '';
@@ -287,7 +335,8 @@ function showPharmaDetail(pharmaNode) {
     physicianEl.innerHTML = '<div class="detail-item-meta">None found</div>';
   } else {
     paidEdges.slice(0, 20).forEach(edge => {
-      const doc = nodeMap[getNodeId(edge.target)];
+      const targetId = String(edge.target || '');
+      const doc = nodeMap[targetId];
       if (!doc) return;
       const row = document.createElement('div');
       row.className = 'detail-item';
@@ -309,7 +358,7 @@ function showPharmaDetail(pharmaNode) {
 
   // Drugs manufactured by this pharma
   const drugEdges = links
-    .filter(l => l.type === 'MANUFACTURES' && getNodeId(l.source) === pharmaNode.id);
+    .filter(l => l.type === 'MANUFACTURES' && String(l.source || '') === pharmaId);
 
   const drugsEl = document.getElementById('detail-drugs');
   drugsEl.innerHTML = '';
@@ -317,8 +366,8 @@ function showPharmaDetail(pharmaNode) {
     drugsEl.innerHTML = '<div class="detail-item-meta">None found in OpenFDA</div>';
   } else {
     drugEdges.forEach(edge => {
-      const drug = nodeMap[getNodeId(edge.target)];
-      if (!drug) return;
+      const drug = nodeMap[String(edge.target || '')];
+      if (!drug || drug.type !== 'drug') return;
       const row = document.createElement('div');
       row.className = 'detail-item';
       row.innerHTML = `
@@ -328,12 +377,31 @@ function showPharmaDetail(pharmaNode) {
     });
   }
 
+  // Devices/products (from CMS payment product field — not in OpenFDA)
+  const deviceNodes = drugEdges
+    .map(e => nodeMap[String(e.target || '')])
+    .filter(n => n && n.type === 'device');
+  const devicesEl = document.getElementById('detail-devices');
+  devicesEl.innerHTML = '';
+  if (!deviceNodes.length) {
+    devicesEl.innerHTML = '<div class="detail-item-meta">None in this dataset</div>';
+  } else {
+    deviceNodes.forEach(device => {
+      const row = document.createElement('div');
+      row.className = 'detail-item';
+      row.innerHTML = `
+        <span class="detail-item-name">${device.label}</span>
+        <span class="detail-item-meta">${formatMoney(device.props.total_payments || 0)} in payments</span>`;
+      devicesEl.appendChild(row);
+    });
+  }
+
   // Conditions — via drug → condition edges for drugs made by this pharma
-  const drugIds = new Set(drugEdges.map(e => getNodeId(e.target)));
+  const drugIds = new Set(drugEdges.map(e => String(e.target || '')));
   const conditionIds = new Set(
     links
-      .filter(l => l.type === 'INDICATED_FOR' && drugIds.has(getNodeId(l.source)))
-      .map(l => getNodeId(l.target))
+      .filter(l => l.type === 'INDICATED_FOR' && drugIds.has(String(l.source || '')))
+      .map(l => String(l.target || ''))
   );
 
   const conditionsEl = document.getElementById('detail-conditions');
@@ -354,8 +422,68 @@ function showPharmaDetail(pharmaNode) {
   }
 }
 
+function showPhysicianDetail(physicianNode) {
+  const links = currentData ? currentData.edges : [];
+  const nodes = currentData ? currentData.nodes : [];
+  const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const physicianId = String(physicianNode.id || '');
+
+  // Pharma companies that paid this physician
+  const paidEdges = links
+    .filter(l => l.type === 'PAID' && String(l.target || '') === physicianId)
+    .sort((a, b) => Number(b.weight || 0) - Number(a.weight || 0));
+
+  const payersEl = document.getElementById('detail-payers');
+  payersEl.innerHTML = '';
+  if (!paidEdges.length) {
+    payersEl.innerHTML = '<div class="detail-item-meta">No payments recorded</div>';
+  } else {
+    paidEdges.forEach(edge => {
+      const pharma = nodeMap[String(edge.source || '')];
+      if (!pharma) return;
+      const row = document.createElement('div');
+      row.className = 'detail-item';
+      row.style.cursor = 'pointer';
+      row.innerHTML = `
+        <span class="detail-item-name">${pharma.label}</span>
+        <span class="detail-item-paid">${formatMoney(edge.weight)}</span>`;
+      row.onclick = () => flyToNode(pharma);
+      payersEl.appendChild(row);
+    });
+  }
+
+  // Drugs/devices this physician received payments for
+  const receivedEdges = links
+    .filter(l => l.type === 'RECEIVED_FOR' && String(l.source || '') === physicianId);
+
+  const productsEl = document.getElementById('detail-products');
+  productsEl.innerHTML = '';
+  if (!receivedEdges.length) {
+    productsEl.innerHTML = '<div class="detail-item-meta">No specific products recorded</div>';
+  } else {
+    receivedEdges.forEach(edge => {
+      const product = nodeMap[String(edge.target || '')];
+      if (!product) return;
+      const row = document.createElement('div');
+      row.className = 'detail-item';
+      row.innerHTML = `
+        <span class="detail-item-name">${product.label}</span>
+        <span class="detail-item-meta" style="color:${product.type === 'device' ? '#FFAB40' : '#FFD54F'};">${product.type}</span>`;
+      productsEl.appendChild(row);
+    });
+  }
+}
+
 function closeNodePanel() {
   document.getElementById('node-panel').style.transform = 'translateX(100%)';
+}
+
+function resetCamera() {
+  if (!G) return;
+  selectedNode = null;
+  resetHighlight();
+  closeNodePanel();
+  G.zoomToFit(600, 80);
 }
 
 // ─── HIGHLIGHT ────────────────────────────────────────────────────────────────
@@ -365,7 +493,7 @@ function getNodeId(val) {
 }
 
 function applyHighlight(nodeId) {
-  const links = currentData ? currentData.edges : [];
+  const links = G ? G.graphData().links : [];
   highlightNodes = new Set([nodeId]);
   highlightLinks = new Set();
 
@@ -390,6 +518,7 @@ function resetHighlight() {
 function refreshGraph() {
   if (!G) return;
   G.nodeColor(G.nodeColor());
+  G.nodeThreeObject(G.nodeThreeObject());
   G.linkColor(G.linkColor());
   G.linkWidth(G.linkWidth());
 }
@@ -397,7 +526,6 @@ function refreshGraph() {
 // ─── EVENT HANDLERS ───────────────────────────────────────────────────────────
 
 function handleNodeHover(node) {
-  if (ftmMode) return;
   if (node) {
     applyHighlight(node.id);
   } else if (selectedNode) {
@@ -408,107 +536,9 @@ function handleNodeHover(node) {
 }
 
 function handleNodeClick(node) {
-  if (ftmMode) {
-    handleFtmClick(node);
-    return;
-  }
   selectedNode = node;
   showNodePanel(node);
   applyHighlight(node.id);
-}
-
-// ─── FOLLOW THE MONEY ─────────────────────────────────────────────────────────
-
-function toggleFollowMoney() {
-  ftmMode ? resetFollowMoney() : startFollowMoney();
-}
-
-function startFollowMoney() {
-  ftmMode     = true;
-  ftmStep     = 1;
-  ftmPharmaId = null;
-  selectedNode = null;
-  resetHighlight();
-  closeNodePanel();
-
-  const btn = document.getElementById('ftm-btn');
-  btn.style.background = 'rgba(255,107,53,0.12)';
-  btn.classList.add('ftm-glow');
-  showFtmBar('Click a pharma company (cyan) to start.');
-}
-
-function handleFtmClick(node) {
-  if (ftmStep === 1) {
-    if (node.type !== 'pharma') {
-      showFtmBar('Select a pharma company (cyan node) first.');
-      return;
-    }
-    ftmPharmaId = node.id;
-    ftmStep = 2;
-    highlightNodes = new Set([node.id]);
-    highlightLinks = new Set();
-    refreshGraph();
-    showFtmBar(`"${node.label}" selected — now click a drug (yellow node).`);
-
-  } else if (ftmStep === 2) {
-    if (node.type !== 'drug') {
-      showFtmBar('Select a drug (yellow node).');
-      return;
-    }
-    runFollowMoney(ftmPharmaId, node.id);
-  }
-}
-
-function runFollowMoney(pharmaId, drugId) {
-  const links = currentData ? currentData.edges : [];
-
-  const paidByPharma = new Set(
-    links
-      .filter(l => l.type === 'PAID' && getNodeId(l.source) === pharmaId)
-      .map(l => getNodeId(l.target))
-  );
-
-  const receivedForDrug = new Set(
-    links
-      .filter(l => l.type === 'RECEIVED_FOR' && getNodeId(l.target) === drugId)
-      .map(l => getNodeId(l.source))
-  );
-
-  const intersection  = new Set([...paidByPharma].filter(id => receivedForDrug.has(id)));
-  const targetSet     = intersection.size > 0 ? intersection : paidByPharma;
-
-  highlightNodes = new Set([pharmaId, drugId, ...targetSet]);
-  highlightLinks = new Set(
-    links.filter(l => {
-      const s = getNodeId(l.source);
-      const t = getNodeId(l.target);
-      return highlightNodes.has(s) && highlightNodes.has(t);
-    })
-  );
-  refreshGraph();
-
-  const n = targetSet.size;
-  const msg = intersection.size > 0
-    ? `${n} physician${n !== 1 ? 's' : ''} paid by this company for this drug.`
-    : `${n} physician${n !== 1 ? 's' : ''} paid by this company (no direct drug match).`;
-  showFtmBar(msg);
-}
-
-function resetFollowMoney() {
-  ftmMode     = false;
-  ftmStep     = 0;
-  ftmPharmaId = null;
-
-  const btn = document.getElementById('ftm-btn');
-  btn.style.background = 'transparent';
-  btn.classList.remove('ftm-glow');
-  document.getElementById('ftm-bar').style.display = 'none';
-  resetHighlight();
-}
-
-function showFtmBar(text) {
-  document.getElementById('ftm-instruction').textContent = text;
-  document.getElementById('ftm-bar').style.display = 'block';
 }
 
 // ─── LEGEND ───────────────────────────────────────────────────────────────────
@@ -523,6 +553,10 @@ function toggleLegend() {
 
 // ─── SELECTORS ────────────────────────────────────────────────────────────────
 
+// Only years with confirmed CMS dataset IDs
+const VALID_YEARS = [2024, 2023, 2022, 2021, 2020, 2019, 2018];
+const DEFAULT_YEAR = 2024;
+
 function initStateSelect() {
   const sel = document.getElementById('state-select');
   US_STATES.forEach(s => {
@@ -534,11 +568,27 @@ function initStateSelect() {
   });
 }
 
+function initYearSelect() {
+  const sel = document.getElementById('year-select');
+  VALID_YEARS.forEach(y => {
+    const opt = document.createElement('option');
+    opt.value = String(y);
+    opt.textContent = String(y);
+    if (y === DEFAULT_YEAR) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function getSelectedState() {
+  return document.getElementById('state-select').value;
+}
+
+function getSelectedYear() {
+  return document.getElementById('year-select').value;
+}
+
 function onSelectorChange() {
-  loadGraph(
-    document.getElementById('state-select').value,
-    document.getElementById('year-select').value
-  );
+  loadGraph(getSelectedState(), getSelectedYear());
 }
 
 document.getElementById('state-select').addEventListener('change', onSelectorChange);
@@ -555,5 +605,6 @@ function formatMoney(val) {
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
 
 initStateSelect();
+initYearSelect();
 initGraph();
-loadGraph('GA', '2023');
+loadGraph(getSelectedState(), getSelectedYear());

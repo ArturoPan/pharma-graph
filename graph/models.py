@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Any, Literal
 
-NodeType = Literal["pharma", "drug", "condition", "physician"]
+NodeType = Literal["pharma", "drug", "condition", "physician", "device"]
 EdgeType = Literal["MANUFACTURES", "INDICATED_FOR", "SPECIALIZES_IN", "PAID", "RECEIVED_FOR", "PEER_OF"]
 
 

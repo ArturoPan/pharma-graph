@@ -4,9 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Impiricus Clinical Intelligence Graph</title>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://unpkg.com/3d-force-graph@1"></script>
+  <script src="https://unpkg.com/three-spritetext@1"></script>
 </head>
 <body>
 
@@ -16,19 +17,17 @@
   <!-- ─── Top Bar ──────────────────────────────────────────────────────────── -->
   <div id="top-bar">
     <div id="top-bar-left">
-      <select id="state-select"></select>
-      <select id="year-select">
-        <option value="2023">2023</option>
-        <option value="2022">2022</option>
-        <option value="2021">2021</option>
-        <option value="2020">2020</option>
-      </select>
+      <select id="state-select" aria-label="State"></select>
+      <select id="year-select" aria-label="Year"></select>
     </div>
 
-    <h1 id="top-bar-title" class="font-syne">IMPIRICUS GRAPH</h1>
+    <div id="top-bar-center">
+      <h1 id="top-bar-title" class="font-syne">IMPIRICUS GRAPH</h1>
+      <p id="top-bar-subtitle">Pharma–Physician Influence Network · US Open Payments</p>
+    </div>
 
     <div id="top-bar-right">
-      <button id="ftm-btn" onclick="toggleFollowMoney()">Follow the Money</button>
+      <button id="reset-btn" onclick="resetCamera()" title="Zoom out to full graph view">⌖ Reset View</button>
       <div id="stats-bar">
         <span>Nodes: <span id="stat-nodes">—</span></span>
         <span>Edges: <span id="stat-edges">—</span></span>
@@ -59,11 +58,27 @@
     <div id="panel-scroll">
     <div id="panel-props"></div>
 
+    <!-- Physician-specific detail sections -->
+    <div id="physician-detail" style="display:none;">
+      <div class="panel-section">
+        <div class="panel-section-title" style="color:#FF7043;">Paid By</div>
+        <div id="detail-payers"></div>
+      </div>
+      <div class="panel-section">
+        <div class="panel-section-title" style="color:#FFD54F;">Products / Drugs</div>
+        <div id="detail-products"></div>
+      </div>
+    </div>
+
     <!-- Pharma-specific detail sections (only visible for pharma nodes) -->
     <div id="pharma-detail" style="display:none;">
       <div class="panel-section">
         <div class="panel-section-title" style="color:#FFD600;">Drugs</div>
         <div id="detail-drugs"></div>
+      </div>
+      <div class="panel-section">
+        <div class="panel-section-title" style="color:#FF9F1C;">Devices / Products</div>
+        <div id="detail-devices"></div>
       </div>
       <div class="panel-section">
         <div class="panel-section-title" style="color:#FF4D8B;">Conditions</div>
@@ -87,12 +102,6 @@
     <p id="loading-text"></p>
   </div>
 
-  <!-- ─── Follow the Money Instruction Bar ─────────────────────────────────── -->
-  <div id="ftm-bar">
-    <span id="ftm-instruction"></span>
-    <button id="ftm-reset" onclick="resetFollowMoney()">Reset</button>
-  </div>
-
   <!-- ─── Legend ───────────────────────────────────────────────────────────── -->
   <div id="legend">
     <div id="legend-header">
@@ -101,14 +110,16 @@
     </div>
     <div id="legend-body">
       <div class="legend-nodes">
-        <div class="legend-row"><div class="legend-dot" style="background:#00E5FF;"></div><span class="legend-text">Pharma Company</span></div>
-        <div class="legend-row"><div class="legend-dot" style="background:#00FF9D;"></div><span class="legend-text">Physician</span></div>
-        <div class="legend-row"><div class="legend-dot" style="background:#FFD600;"></div><span class="legend-text">Drug</span></div>
-        <div class="legend-row"><div class="legend-dot" style="background:#FF4D8B;"></div><span class="legend-text">Condition</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#4FC3F7; box-shadow:0 0 6px #4FC3F7;"></div><span class="legend-text">Pharma Company</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#81C995; box-shadow:0 0 6px #81C995;"></div><span class="legend-text">Physician</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#FFD54F; box-shadow:0 0 6px #FFD54F;"></div><span class="legend-text">Drug</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#FFAB40; box-shadow:0 0 6px #FFAB40;"></div><span class="legend-text">Device / Product</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#F48FB1; box-shadow:0 0 6px #F48FB1;"></div><span class="legend-text">Condition</span></div>
       </div>
       <div class="legend-edges">
-        <div class="legend-row"><div class="legend-line" style="background:#FF6B35;"></div><span class="legend-text">PAID</span></div>
-        <div class="legend-row"><div class="legend-line" style="background:#7B61FF;"></div><span class="legend-text">PEER_OF</span></div>
+        <div class="legend-row"><div class="legend-line" style="background:#FF7043;"></div><span class="legend-text">PAID</span></div>
+        <div class="legend-row"><div class="legend-line" style="background:#CE93D8;"></div><span class="legend-text">PEER_OF</span></div>
+        <div class="legend-row"><div class="legend-line" style="background:rgba(100,160,220,0.6);"></div><span class="legend-text">Structural</span></div>
       </div>
     </div>
   </div>

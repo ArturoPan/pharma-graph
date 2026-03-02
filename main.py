@@ -27,13 +27,17 @@ DATA_DIR.mkdir(exist_ok=True)
 
 _memory_cache: dict[tuple[str, int], GraphResponse] = {}
 
-VALID_YEARS = {2020, 2021, 2022, 2023}
+VALID_YEARS = {2018, 2019, 2020, 2021, 2022, 2023, 2024}  # years with confirmed CMS dataset IDs
 US_STATES = {
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
     "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
     "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
     "VA","WA","WV","WI","WY","DC",
 }
+
+
+# Bump when graph schema changes (e.g. added device nodes) so old disk cache is ignored
+CACHE_VERSION = 2
 
 
 def _disk_path(state: str, year: int) -> Path:
@@ -46,7 +50,10 @@ def _load_from_disk(state: str, year: int) -> GraphResponse | None:
         return None
     try:
         data = json.loads(path.read_text())
-        graph = GraphResponse(**data)
+        if data.get("cache_version") != CACHE_VERSION:
+            logger.info("Disk cache outdated (version %s) for state=%s year=%s — will refetch", data.get("cache_version"), state, year)
+            return None
+        graph = GraphResponse(**data["graph"])
         logger.info("Disk cache hit for state=%s year=%s", state, year)
         return graph
     except Exception as exc:
@@ -56,7 +63,8 @@ def _load_from_disk(state: str, year: int) -> GraphResponse | None:
 
 def _save_to_disk(state: str, year: int, graph: GraphResponse) -> None:
     try:
-        _disk_path(state, year).write_text(graph.model_dump_json())
+        payload = {"cache_version": CACHE_VERSION, "graph": graph.model_dump()}
+        _disk_path(state, year).write_text(json.dumps(payload))
         logger.info("Saved to disk cache: %s_%s.json", state, year)
     except Exception as exc:
         logger.warning("Failed to save disk cache: %s", exc)
