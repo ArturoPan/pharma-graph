@@ -2,8 +2,6 @@
 
 An interactive 3D visualization of the pharma-physician influence network for any US state and year, built entirely on public government APIs — no API keys required.
 
-![Graph visualization showing pharmaceutical companies, physicians, drugs, and conditions as interconnected nodes](reference-pic.png)
-
 ---
 
 ## What It Does
@@ -15,8 +13,6 @@ This tool maps the financial relationships between pharmaceutical companies and 
 - **OpenFDA** — links pharmaceutical companies to their drugs and the conditions those drugs treat
 
 The result is a live, explorable graph where you can see which pharma companies pay the most to physicians in a given state, which physicians receive the most payments, and how drugs connect to medical conditions.
-
-![Detail panel showing pharma node with payment breakdown](reference-pic-two.png)
 
 ---
 
