@@ -24,3 +24,11 @@ CLAUDE.md
 impiricus-graph-prd.md
 docs/
 screenshot-explanation.md
+
+# Screenshots and local assets
+*.png
+*.jpg
+*.jpeg
+
+# Claude/editor local settings
+.claude/
