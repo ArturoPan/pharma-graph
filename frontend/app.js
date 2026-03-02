@@ -95,10 +95,6 @@ function initGraph() {
         : 0.5;
       return (highlightLinks.size && highlightLinks.has(link)) ? base * 2.5 : base;
     })
-    .linkDirectionalParticles(link => link.type === 'PAID' ? 4 : 0)
-    .linkDirectionalParticleSpeed(0.005)
-    .linkDirectionalParticleWidth(link => Math.log((link.weight / 5000) + 1) + 1)
-    .linkDirectionalParticleColor(() => '#FF6B35')
     .d3AlphaDecay(0.015)
     .d3VelocityDecay(0.25)
     .onNodeClick(node  => handleNodeClick(node))
@@ -215,6 +211,8 @@ function filterSidebar(query) {
 
 function flyToNode(node) {
   if (!G || node.x === undefined) return;
+  selectedNode = node;
+  applyHighlight(node.id);
   const dist = 220;
   const r = 1 + dist / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
   G.cameraPosition(

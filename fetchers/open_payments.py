@@ -3,8 +3,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://openpaymentsdata.cms.gov/api/1/datastore/query/{dataset_id}/0"
-LIST_URL = "https://openpaymentsdata.cms.gov/api/1/metastore/schemas/dataset/items?show-reference-ids=false"
+# DKAN endpoints — SQL endpoint supports CAST for proper numeric sort
+SQL_URL   = "https://openpaymentsdata.cms.gov/api/1/datastore/sql"
+POST_URL  = "https://openpaymentsdata.cms.gov/api/1/datastore/query/{dataset_id}/0"
+LIST_URL  = "https://openpaymentsdata.cms.gov/api/1/metastore/schemas/dataset/items?show-reference-ids=false"
 
 # Verified dataset IDs from CMS metastore (api/1/metastore/schemas/dataset/items)
 OPEN_PAYMENTS_DATASETS: dict[int, str] = {
@@ -14,46 +16,24 @@ OPEN_PAYMENTS_DATASETS: dict[int, str] = {
     2023: "fb3a65aa-c901-4a38-a813-b04b00dfa2a9",
 }
 
+FETCH_LIMIT = 2000  # Records to fetch — enough to capture large consulting fees
+
 # CMS Open Payments field names in the API response
-FIELD_NPI = "covered_recipient_npi"
-FIELD_FIRST = "covered_recipient_first_name"
-FIELD_LAST = "covered_recipient_last_name"
+FIELD_NPI     = "covered_recipient_npi"
+FIELD_FIRST   = "covered_recipient_first_name"
+FIELD_LAST    = "covered_recipient_last_name"
 FIELD_COMPANY = "applicable_manufacturer_or_applicable_gpo_making_payment_name"
-FIELD_DRUG = "name_of_drug_or_biological_or_device_or_medical_supply_1"
-FIELD_AMOUNT = "total_amount_of_payment_usdollars"
-FIELD_NATURE = "nature_of_payment_or_transfer_of_value"
-FIELD_DATE = "date_of_payment"
-
-
-async def _resolve_dataset_id(client: httpx.AsyncClient, year: int) -> str | None:
-    """
-    If the hardcoded dataset ID for a year returns 404, fall back to fetching
-    the datastore list and finding the dataset matching the program year.
-    """
-    try:
-        resp = await client.get(LIST_URL, timeout=10)
-        resp.raise_for_status()
-        datasets = resp.json()
-        year_str = str(year)
-        for ds in datasets:
-            identifier = ds.get("identifier", "")
-            title = ds.get("title", "").lower()
-            # Match on program year in the title or identifier
-            if year_str in title or year_str in identifier:
-                logger.info("Resolved dataset ID for %s: %s", year, identifier)
-                return identifier
-        logger.warning("Could not resolve dataset ID for year %s from list endpoint", year)
-    except Exception as exc:
-        logger.error("Failed to fetch datastore list: %s", exc)
-    return None
+FIELD_DRUG    = "name_of_drug_or_biological_or_device_or_medical_supply_1"
+FIELD_AMOUNT  = "total_amount_of_payment_usdollars"
+FIELD_NATURE  = "nature_of_payment_or_transfer_of_value"
+FIELD_DATE    = "date_of_payment"
 
 
 def _parse_payment(row: dict) -> dict | None:
-    npi = row.get(FIELD_NPI, "").strip()
+    npi     = row.get(FIELD_NPI, "").strip()
     company = row.get(FIELD_COMPANY, "").strip()
     amount_raw = row.get(FIELD_AMOUNT, 0)
 
-    # Skip rows missing the fields we need for graph edges
     if not npi or not company:
         return None
 
@@ -63,75 +43,121 @@ def _parse_payment(row: dict) -> dict | None:
         amount = 0.0
 
     return {
-        "npi": npi,
+        "npi":            npi,
         "physician_first": row.get(FIELD_FIRST, "").strip(),
-        "physician_last": row.get(FIELD_LAST, "").strip(),
-        "company": company,
-        "drug": row.get(FIELD_DRUG, "").strip(),
-        "amount": amount,
-        "nature": row.get(FIELD_NATURE, "").strip(),
-        "date": row.get(FIELD_DATE, "").strip(),
+        "physician_last":  row.get(FIELD_LAST, "").strip(),
+        "company":         company,
+        "drug":            row.get(FIELD_DRUG, "").strip(),
+        "amount":          amount,
+        "nature":          row.get(FIELD_NATURE, "").strip(),
+        "date":            row.get(FIELD_DATE, "").strip(),
     }
+
+
+async def _fetch_via_sql(
+    client: httpx.AsyncClient, dataset_id: str, state: str
+) -> list[dict] | None:
+    """
+    Use the DKAN SQL endpoint which supports CAST for proper numeric sorting.
+    Returns None if the endpoint is unavailable so the caller can fall back.
+    """
+    select_cols = ", ".join([
+        FIELD_NPI, FIELD_FIRST, FIELD_LAST, FIELD_COMPANY,
+        FIELD_DRUG, FIELD_AMOUNT, FIELD_NATURE, FIELD_DATE,
+    ])
+    # DKAN SQL syntax: each clause in its own square brackets
+    query = (
+        f"[SELECT {select_cols} FROM {dataset_id}]"
+        f"[WHERE recipient_state = '{state}']"
+        f"[ORDER BY CAST({FIELD_AMOUNT} AS DECIMAL) DESC]"
+        f"[LIMIT {FETCH_LIMIT}]"
+    )
+    try:
+        resp = await client.get(SQL_URL, params={"query": query}, timeout=40)
+        if resp.status_code != 200:
+            logger.warning("SQL endpoint HTTP %s for state=%s", resp.status_code, state)
+            return None
+        rows = resp.json()
+        if not isinstance(rows, list):
+            logger.warning("SQL endpoint returned non-list: %s", type(rows))
+            return None
+        payments = [p for p in (_parse_payment(r) for r in rows) if p]
+        logger.info("SQL endpoint: %d payments for state=%s", len(payments), state)
+        return payments
+    except Exception as exc:
+        logger.warning("SQL endpoint error: %s", exc)
+        return None
+
+
+async def _fetch_via_post(
+    client: httpx.AsyncClient, dataset_id: str, state: str, year: int
+) -> list[dict]:
+    """
+    Fall back to POST query endpoint (no reliable numeric sort, but still useful).
+    """
+    url = POST_URL.format(dataset_id=dataset_id)
+    payload = {
+        "conditions": [{"property": "recipient_state", "value": state, "operator": "="}],
+        "limit": FETCH_LIMIT,
+        "offset": 0,
+    }
+    try:
+        resp = await client.post(url, json=payload, timeout=40)
+        if resp.status_code == 404:
+            # Dataset ID stale — resolve from metastore
+            resolved = await _resolve_dataset_id(client, year)
+            if not resolved:
+                return []
+            url = POST_URL.format(dataset_id=resolved)
+            resp = await client.post(url, json=payload, timeout=40)
+        if resp.status_code != 200:
+            logger.error("POST fallback HTTP %s for state=%s year=%s", resp.status_code, state, year)
+            return []
+        data = resp.json()
+        rows = data.get("results", data.get("data", []))
+        payments = [p for p in (_parse_payment(r) for r in rows) if p]
+        logger.info("POST fallback: %d payments for state=%s year=%s", len(payments), state, year)
+        return payments
+    except Exception as exc:
+        logger.error("POST fallback error: %s", exc)
+        return []
+
+
+async def _resolve_dataset_id(client: httpx.AsyncClient, year: int) -> str | None:
+    try:
+        resp = await client.get(LIST_URL, timeout=10)
+        resp.raise_for_status()
+        datasets = resp.json()
+        year_str = str(year)
+        for ds in datasets:
+            identifier = ds.get("identifier", "")
+            title = ds.get("title", "").lower()
+            if year_str in title or year_str in identifier:
+                logger.info("Resolved dataset ID for %s: %s", year, identifier)
+                return identifier
+    except Exception as exc:
+        logger.error("Failed to fetch datastore list: %s", exc)
+    return None
 
 
 async def fetch_open_payments(state: str, year: int) -> list[dict]:
     """
-    Fetch pharma→physician payments for a given state and year from CMS Open Payments.
-    Returns a list of payment dicts. Returns [] on any error.
+    Fetch the top pharma→physician payments for a given state and year.
+
+    Tries the SQL endpoint first (supports CAST for numeric sort — gives us the
+    largest payments). Falls back to POST if SQL is unavailable.
     """
     dataset_id = OPEN_PAYMENTS_DATASETS.get(year)
     if not dataset_id:
         logger.error("No dataset ID configured for year %s", year)
         return []
 
-    url = BASE_URL.format(dataset_id=dataset_id)
-    payload = {
-        "conditions": [
-            {"property": "recipient_state", "value": state, "operator": "="}
-        ],
-        "limit": 500,
-        "offset": 0,
-        "sort": [{"property": FIELD_AMOUNT, "order": "desc"}],
-    }
+    async with httpx.AsyncClient() as client:
+        # Try SQL endpoint (proper numeric sort)
+        result = await _fetch_via_sql(client, dataset_id, state)
+        if result is not None:
+            return result
 
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json=payload, timeout=20)
-
-            # If the hardcoded ID is stale, try to resolve it from the list endpoint
-            if resp.status_code == 404:
-                logger.warning(
-                    "CMS Open Payments: 404 for dataset %s (year %s), attempting resolution",
-                    dataset_id, year,
-                )
-                resolved = await _resolve_dataset_id(client, year)
-                if not resolved:
-                    return []
-                url = BASE_URL.format(dataset_id=resolved)
-                resp = await client.post(url, json=payload, timeout=20)
-
-            if resp.status_code != 200:
-                logger.error(
-                    "CMS Open Payments: HTTP %s for state=%s year=%s",
-                    resp.status_code, state, year,
-                )
-                return []
-
-            data = resp.json()
-            rows = data.get("results", data.get("data", []))
-
-            payments = []
-            for row in rows:
-                parsed = _parse_payment(row)
-                if parsed:
-                    payments.append(parsed)
-
-            logger.info(
-                "CMS Open Payments: %d payments fetched for state=%s year=%s",
-                len(payments), state, year,
-            )
-            return payments
-
-    except Exception as exc:
-        logger.error("CMS Open Payments: unexpected error for state=%s year=%s: %s", state, year, exc)
-        return []
+        # Fall back to POST (no numeric sort, but still returns data)
+        logger.warning("Falling back to POST for state=%s year=%s", state, year)
+        return await _fetch_via_post(client, dataset_id, state, year)

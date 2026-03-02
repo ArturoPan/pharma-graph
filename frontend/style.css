@@ -248,9 +248,12 @@ select option {
 }
 #panel-close:hover { color: white; }
 
-#panel-props {
+#panel-scroll {
   overflow-y: auto;
   flex: 1;
+}
+
+#panel-props {
   padding: 16px;
   display: flex;
   flex-direction: column;
